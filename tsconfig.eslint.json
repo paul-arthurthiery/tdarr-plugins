@@ -1,4 +1,12 @@
 {
     "extends": "./tsconfig.json",
-    "exclude": []
+    "include": [
+        "./FlowPluginsTs/**/*",
+        "./Local/FlowPluginsTs/**/*",
+        "./Local/FlowTemplatesTs/**/*"
+    ],
+    "exclude": [
+        "tests/FlowPlugins",
+        "node_modules"
+    ]
 }

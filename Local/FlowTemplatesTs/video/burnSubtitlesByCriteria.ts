@@ -1,0 +1,256 @@
+import { IflowTemplate } from '../../../FlowPluginsTs/FlowHelpers/1.0.0/interfaces/interfaces';
+
+const details = (): IflowTemplate => ({
+  name: 'Burn Subtitles by Criteria',
+  description: 'Burns subtitles into videos based on specific codec, language, and keyword criteria using local flow plugins',
+  tags: 'subtitle,burn,ffmpeg,local',
+  flowPlugins: [
+    {
+      name: 'Input File',
+      sourceRepo: 'Community',
+      pluginName: 'inputFile',
+      version: '1.0.0',
+      inputsDB: {},
+      id: 'inputFile_1',
+      position: {
+        x: 100,
+        y: 100,
+      },
+      fpEnabled: true,
+    },
+    {
+      name: 'Check If Processed',
+      sourceRepo: 'Community',
+      pluginName: 'processedCheck',
+      version: '1.0.0',
+      id: 'processedCheck_1',
+      position: {
+        x: 100,
+        y: 200,
+      },
+      fpEnabled: true,
+      inputsDB: {
+        checkType: 'filePath',
+      },
+    },
+    {
+      name: 'Find Subtitle Index',
+      sourceRepo: 'Local',
+      pluginName: 'findSubtitleIndex',
+      version: '1.0.0',
+      id: 'findSubtitleIndex_1',
+      position: {
+        x: 100,
+        y: 300,
+      },
+      fpEnabled: true,
+      inputsDB: {
+        codec: 'ass',
+        language: 'eng',
+        keyword: 'dialogue',
+      },
+    },
+    {
+      name: 'Normalize Filename',
+      sourceRepo: 'Local',
+      pluginName: 'normalizeFilename',
+      version: '1.0.0',
+      id: 'normalizeFilename_1',
+      position: {
+        x: 100,
+        y: 400,
+      },
+      fpEnabled: true,
+      inputsDB: {
+        removeSpecialChars: 'true',
+        replaceSpaces: 'false',
+        replacementChar: '_',
+      },
+    },
+    {
+      name: 'Burn Subtitles',
+      sourceRepo: 'Local',
+      pluginName: 'burnSubtitles',
+      version: '1.0.0',
+      id: 'burnSubtitles_1',
+      position: {
+        x: 100,
+        y: 500,
+      },
+      fpEnabled: true,
+      inputsDB: {
+        videoCodec: 'libx265',
+        audioCodec: 'copy',
+        ffmpegPath: '/usr/local/bin/ffmpeg',
+      },
+    },
+    {
+      name: 'Run CLI',
+      sourceRepo: 'Community',
+      pluginName: 'runCli',
+      version: '1.0.0',
+      id: 'runCli_1',
+      position: {
+        x: 100,
+        y: 550,
+      },
+      fpEnabled: true,
+      inputsDB: {
+        useCustomCliPath: 'true',
+        customCliPath: '{{{args.variables.user.ffmpegPath}}}',
+        cliArguments: '{{{args.variables.user.ffmpegArgs}}}',
+        outputFileBecomesWorkingFile: 'true',
+        doesCommandCreateOutputFile: 'true',
+        userOutputFilePath: '{{{args.variables.user.outputFilePath}}}',
+      },
+    },
+    {
+      name: 'Replace Original File',
+      sourceRepo: 'Community',
+      pluginName: 'replaceOriginalFile',
+      version: '1.0.0',
+      inputsDB: {},
+      id: 'replaceOriginalFile_1',
+      position: {
+        x: 100,
+        y: 600,
+      },
+      fpEnabled: true,
+    },
+    {
+      name: 'Fail Flow',
+      sourceRepo: 'Community',
+      pluginName: 'failFlow',
+      version: '1.0.0',
+      id: 'failFlow_1',
+      position: {
+        x: 300,
+        y: 400,
+      },
+      fpEnabled: true,
+      inputsDB: {},
+    },
+  ],
+  flowEdges: [
+    // Success path edges
+    {
+      source: 'inputFile_1',
+      sourceHandle: '1',
+      target: 'processedCheck_1',
+      targetHandle: null,
+      id: 'edge_1',
+    },
+    {
+      source: 'processedCheck_1',
+      sourceHandle: '1',
+      target: 'findSubtitleIndex_1',
+      targetHandle: null,
+      id: 'edge_2',
+    },
+    {
+      source: 'findSubtitleIndex_1',
+      sourceHandle: '1',
+      target: 'normalizeFilename_1',
+      targetHandle: null,
+      id: 'edge_3',
+    },
+    {
+      source: 'normalizeFilename_1',
+      sourceHandle: '1',
+      target: 'burnSubtitles_1',
+      targetHandle: null,
+      id: 'edge_4',
+    },
+    {
+      source: 'burnSubtitles_1',
+      sourceHandle: '1',
+      target: 'runCli_1',
+      targetHandle: null,
+      id: 'edge_5',
+    },
+    {
+      source: 'runCli_1',
+      sourceHandle: '1',
+      target: 'replaceOriginalFile_1',
+      targetHandle: null,
+      id: 'edge_6',
+    },
+
+    // Failure path edges - connect output 2 of each plugin to Fail Flow
+    {
+      source: 'processedCheck_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_1',
+    },
+    {
+      source: 'findSubtitleIndex_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_2',
+    },
+    {
+      source: 'normalizeFilename_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_3',
+    },
+    {
+      source: 'burnSubtitles_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_4',
+    },
+    {
+      source: 'runCli_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_5',
+    },
+    {
+      source: 'replaceOriginalFile_1',
+      sourceHandle: '2',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_fail_6',
+    },
+
+    // Auto-generated error outputs (output 3) - connect to Fail Flow
+    {
+      source: 'findSubtitleIndex_1',
+      sourceHandle: '3',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_auto_error_1',
+    },
+    {
+      source: 'normalizeFilename_1',
+      sourceHandle: '3',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_auto_error_2',
+    },
+    {
+      source: 'burnSubtitles_1',
+      sourceHandle: '3',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_auto_error_3',
+    },
+    {
+      source: 'runCli_1',
+      sourceHandle: '3',
+      target: 'failFlow_1',
+      targetHandle: null,
+      id: 'edge_auto_error_4',
+    },
+  ],
+});
+
+// eslint-disable-next-line import/prefer-default-export
+export { details };

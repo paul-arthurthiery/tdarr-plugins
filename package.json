@@ -27,9 +27,12 @@
   "scripts": {
     "test": "node ./tests/runTests.js",
     "test:flows": "jest",
-    "lint": "eslint_d FlowPluginsTs Community methods examples tests --ext js,ts",
-    "lint:fix": "eslint_d FlowPluginsTs Community methods examples tests --ext js,ts --fix",
-    "checkPlugins": "node ./tests/checkPlugins.js"
+    "lint": "eslint_d FlowPluginsTs Community methods examples tests Local/ClassicPlugins Local/FlowTemplatesTs --ext js,ts",
+    "lint:fix": "eslint_d FlowPluginsTs Community methods examples tests Local/ClassicPlugins Local/FlowTemplatesTs --ext js,ts --fix",
+    "checkPlugins": "node ./tests/checkPlugins.js",
+    "build": "npm run build:plugins && npm run build:templates",
+    "build:plugins": "cd Local && tsc",
+    "build:templates": "cd Local && tsc FlowTemplatesTs/video/*.ts --outDir FlowTemplates/video --target es2018 --module commonjs --esModuleInterop --skipLibCheck && find FlowTemplates/video -type d -name 'FlowPluginsTs' -exec rm -rf {} + 2>/dev/null || true && find FlowTemplates/video -type d -name 'Local' -exec rm -rf {} + 2>/dev/null || true"
   },
   "repository": {
     "type": "git",

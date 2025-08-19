@@ -1,2 +1,8 @@
 # Ignore LocalFlowPlugins directory
-FlowPluginsTs/LocalFlowPlugins/ 
+FlowPluginsTs/LocalFlowPlugins/
+
+# Ignore compiled Local FlowPlugins (build artifacts)
+Local/FlowPlugins/
+
+# Ignore main compiled FlowPlugins (build artifacts)
+FlowPlugins/
