@@ -75,7 +75,7 @@ interface IpluginInputArgs {
 
 const details = (): IpluginDetails => ({
   name: 'Find Subtitle Index',
-  description: 'Finds subtitle stream index based on codec, language, and keyword criteria. Sets the index in variables for use by other plugins.',
+  description: 'Finds subtitle stream index based on codec, language, and keyword criteria. Accepts multiple keywords with priority order - tries first keyword first, then second keyword, etc. Sets the index in variables for use by other plugins.',
   style: {
     borderColor: '#6efefc',
   },
@@ -107,14 +107,24 @@ const details = (): IpluginDetails => ({
       tooltip: 'Preferred subtitle language (e.g., eng, fre, jpn)',
     },
     {
-      label: 'Title Keyword',
-      name: 'keyword',
+      label: 'Title Keywords',
+      name: 'keywords',
       type: 'string',
-      defaultValue: 'dialogue',
+      defaultValue: 'dialogue,full,complete',
       inputUI: {
         type: 'text',
       },
-      tooltip: 'Keyword to look for in subtitle title metadata (case-insensitive)',
+      tooltip: 'Comma-separated list of keywords to look for in subtitle title metadata (case-insensitive). Will prioritize keywords in order - first try to find streams matching the first keyword, then second keyword, etc.',
+    },
+    {
+      label: 'Fallback Subtitle Index',
+      name: 'fallbackIndex',
+      type: 'number',
+      defaultValue: '-1',
+      inputUI: {
+        type: 'text',
+      },
+      tooltip: 'If no keywords match, use this 0-based index among streams that match codec/language. The stream at this index must have no/empty title. Use -1 to disable fallback.',
     },
   ],
   outputs: [
@@ -141,11 +151,16 @@ const plugin = (args: IpluginInputArgs): IpluginOutputArgs => {
       : input.defaultValue;
   });
 
-  const { codec, language, keyword } = inputs;
+  const {
+    codec, language, keywords, fallbackIndex,
+  } = inputs;
+
+  // Parse keywords from comma-separated string
+  const keywordList = (keywords as string).split(',').map((k) => k.trim()).filter((k) => k.length > 0);
 
   try {
     args.jobLog(`Analyzing subtitle streams for: ${args.inputFileObj._id}\n`);
-    args.jobLog(`Looking for: codec=${codec}, language=${language}, keyword="${keyword}"\n`);
+    args.jobLog(`Looking for: codec=${codec}, language=${language}, keywords="${keywordList.join(', ')}", fallbackIndex=${fallbackIndex}\n`);
 
     // Check if ffProbeData exists
     if (!args.inputFileObj.ffProbeData || !args.inputFileObj.ffProbeData.streams) {
@@ -158,44 +173,127 @@ const plugin = (args: IpluginInputArgs): IpluginOutputArgs => {
     }
 
     // Get subtitle streams from existing ffProbeData
-    const subtitleStreams = args.inputFileObj.ffProbeData.streams.filter(
+    const allSubtitleStreams = args.inputFileObj.ffProbeData.streams.filter(
       (stream) => stream.codec_type === 'subtitle',
     );
 
-    args.jobLog(`Found ${subtitleStreams.length} subtitle streams in file\n`);
+    args.jobLog(`Found ${allSubtitleStreams.length} subtitle streams in file\n`);
 
-    // Find matching stream
-    const matchingStream = subtitleStreams.find((stream) => {
+    // Filter streams by codec and language first (reused throughout)
+    const matchingStreams = allSubtitleStreams.filter((stream) => {
       const codecMatch = stream.codec_name === codec;
-      const langMatch = stream.tags && stream.tags.language === language;
-      const keywordMatch = stream.tags && stream.tags.title
-        && stream.tags.title.toLowerCase().includes((keyword as string).toLowerCase());
-
-      return codecMatch && langMatch && keywordMatch;
+      const langMatch = stream.tags?.language === language;
+      return codecMatch && langMatch;
     });
 
-    let subtitleIndex: number | null = null;
-    let subtitleRelativeIndex: number | null = null;
+    args.jobLog(`Found ${matchingStreams.length} streams matching codec=${codec} and language=${language}\n`);
 
-    if (matchingStream) {
-      subtitleIndex = matchingStream.index;
+    // If there's only one matching stream, use it regardless of other parameters
+    if (matchingStreams.length === 1) {
+      const singleStream = matchingStreams[0];
+      args.jobLog(`Only one stream matches codec and language - auto-selecting stream at index ${singleStream.index}\n`);
+
+      const finalMatchResult = { stream: singleStream, keyword: 'auto-selected-single-match' };
+      const matchedKeyword = finalMatchResult.keyword;
+      const subtitleIndex = finalMatchResult.stream.index;
 
       // Calculate subtitle-relative index for FFmpeg's si parameter
-      // FFmpeg's si expects 0-based index among subtitle streams only
-      subtitleRelativeIndex = subtitleStreams.findIndex(
+      const subtitleRelativeIndex = allSubtitleStreams.findIndex(
         (stream) => stream.index === subtitleIndex,
       );
 
       args.jobLog(`Found subtitle at absolute index ${subtitleIndex}, subtitle-relative index ${subtitleRelativeIndex}\n`);
+
+      // Store subtitle indices in variables for use by other plugins
+      const updatedVariables = {
+        ...args.variables,
+        user: {
+          ...args.variables.user,
+          subtitleIndex: (subtitleIndex ?? -1).toString(),
+          subtitleRelativeIndex: (subtitleRelativeIndex ?? -1).toString(),
+          subtitleCodec: codec as string,
+          subtitleLanguage: language as string,
+          subtitleKeyword: matchedKeyword,
+        },
+      };
+
+      args.jobLog(`Found ${codec} ${language} subtitles at index ${subtitleIndex} with keyword "${matchedKeyword}"\n`);
+
+      return {
+        outputFileObj: args.inputFileObj,
+        outputNumber: 1,
+        variables: updatedVariables,
+      };
     }
 
-    if (subtitleIndex === null) {
-      args.jobLog(`No matching subtitles found (codec=${codec}, lang=${language}, keyword="${keyword}")\n`);
+    // Try each keyword in priority order and get the first match
+    const matchResult = keywordList.reduce((acc, keyword) => {
+      if (acc) {
+        return acc;
+      }
+      const foundStream = matchingStreams.find((stream) => {
+        const titleMatch = stream.tags?.title?.toLowerCase().includes(keyword.toLowerCase());
+        return titleMatch;
+      });
+      return foundStream ? { stream: foundStream, keyword } : undefined;
+    },
+      undefined as { stream: typeof matchingStreams[0]; keyword: string } | undefined);
+
+    let finalMatchResult = matchResult;
+
+    if (!matchResult?.stream?.index) {
+      if (!fallbackIndex) {
+        args.jobLog(`No matching subtitles found (codec=${codec}, lang=${language}, keywords="${keywordList.join(', ')}", and fallback index not specified)\n`);
+        return {
+          outputFileObj: args.inputFileObj,
+          outputNumber: 2,
+          variables: args.variables,
+        };
+      }
+      const fallbackIdx = Number(fallbackIndex);
+      if (fallbackIdx < 0) {
+        args.jobLog(`No matching subtitles found (codec=${codec}, lang=${language}, keywords="${keywordList.join(', ')}", fallback index disabled)\n`);
+        return {
+          outputFileObj: args.inputFileObj,
+          outputNumber: 2,
+          variables: args.variables,
+        };
+      }
+      if (fallbackIdx >= matchingStreams.length) {
+        args.jobLog(`No matching subtitles found (codec=${codec}, lang=${language}, keywords="${keywordList.join(', ')}", fallback index ${fallbackIdx} out of bounds ${matchingStreams.length})\n`);
+        return {
+          outputFileObj: args.inputFileObj,
+          outputNumber: 2,
+          variables: args.variables,
+        };
+      }
+      args.jobLog(`No keyword matches found, trying fallback index ${fallbackIdx} among ${matchingStreams.length} codec/language matching streams\n`);
+
+      const fallbackStream = matchingStreams[fallbackIdx];
+
+      // Validate that the fallback stream has no title (codec and language already match)
+      const hasNoTitle = !fallbackStream.tags?.title || fallbackStream.tags.title.trim() === '';
+
+      if (hasNoTitle) {
+        finalMatchResult = { stream: fallbackStream, keyword: `fallback-index-${fallbackIdx}` };
+        args.jobLog(`Using fallback subtitle at absolute index ${fallbackStream.index} (fallback index ${fallbackIdx} among codec/language matching streams)\n`);
+      } else {
+        args.jobLog(`Fallback index ${fallbackIdx} has title "${fallbackStream.tags?.title}" - only streams with no title allowed for fallback\n`);
+        return {
+          outputFileObj: args.inputFileObj,
+          outputNumber: 2,
+          variables: args.variables,
+        };
+      }
+    }
+
+    if (!finalMatchResult?.stream?.index) {
+      args.jobLog(`No matching subtitles found (codec=${codec}, lang=${language}, keywords="${keywordList.join(', ')}", fallback=${fallbackIndex})\n`);
 
       // Log all available subtitles for debugging
-      if (subtitleStreams.length > 0) {
+      if (allSubtitleStreams.length > 0) {
         args.jobLog('Available subtitle streams:\n');
-        subtitleStreams.forEach((stream) => {
+        allSubtitleStreams.forEach((stream) => {
           const streamCodec = stream.codec_name || 'unknown';
           const streamLang = stream.tags?.language || 'unknown';
           const streamTitle = stream.tags?.title || 'no title';
@@ -213,20 +311,32 @@ const plugin = (args: IpluginInputArgs): IpluginOutputArgs => {
       };
     }
 
+    const matchedKeyword = finalMatchResult?.keyword || '';
+
+    const subtitleIndex = finalMatchResult?.stream.index;
+
+    // Calculate subtitle-relative index for FFmpeg's si parameter
+    // FFmpeg's si expects 0-based index among subtitle streams only
+    const subtitleRelativeIndex = allSubtitleStreams.findIndex(
+      (stream) => stream.index === subtitleIndex,
+    );
+
+    args.jobLog(`Found subtitle at absolute index ${subtitleIndex}, subtitle-relative index ${subtitleRelativeIndex}\n`);
+
     // Store subtitle indices in variables for use by other plugins
     const updatedVariables = {
       ...args.variables,
       user: {
         ...args.variables.user,
-        subtitleIndex: subtitleIndex.toString(),
+        subtitleIndex: (subtitleIndex ?? -1).toString(),
         subtitleRelativeIndex: (subtitleRelativeIndex ?? -1).toString(),
         subtitleCodec: codec as string,
         subtitleLanguage: language as string,
-        subtitleKeyword: keyword as string,
+        subtitleKeyword: matchedKeyword,
       },
     };
 
-    args.jobLog(`Found ${codec} ${language} subtitles at index ${subtitleIndex} with keyword "${keyword}"\n`);
+    args.jobLog(`Found ${codec} ${language} subtitles at index ${subtitleIndex} with keyword "${matchedKeyword}"\n`);
 
     return {
       outputFileObj: args.inputFileObj,
